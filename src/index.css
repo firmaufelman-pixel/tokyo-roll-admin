@@ -1,0 +1,25 @@
+@import url("https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Ubuntu+Mono&display=swap");
+
+html,
+body {
+  margin: 0;
+  background: #111;
+  font-family: "Ubuntu", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ------- */
+
+.ant-select-dropdown {
+  background: #111;
+}
+
+.ant-select-item-option-active {
+  background: #505050 !important;
+}
+
+.ant-message {
+  color: #111;
+}
