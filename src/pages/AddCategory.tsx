@@ -65,9 +65,9 @@ export default function AddCategory() {
                   size="large"
                   onChange={(value: any) => setFieldValue("group", value)}
                 >
-                  <Select.Option value="FOOD">FOOD</Select.Option>
-                  <Select.Option value="DRINKS">DRINKS</Select.Option>
-                  <Select.Option value="OTHER">OTHER</Select.Option>
+                  <Select.Option value="DRINKS">Drinks</Select.Option>
+                  <Select.Option value="FOOD">Asia</Select.Option>
+                  <Select.Option value="OTHER">Sushi</Select.Option>
                 </Field>
                 <ErrorMessage
                   name="group"
