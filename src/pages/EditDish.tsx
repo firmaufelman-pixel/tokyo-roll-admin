@@ -22,7 +22,7 @@ import { DishSchema } from "schemas/dish";
 import supabase from "utils/client";
 
 const SUPABASE_IMAGE_PREFIX =
-  "https://ealmujmxbmhjvahkdbyo.supabase.co/storage/v1/object/public/menu";
+  "https://zwgovmkukyfqznkspkdm.supabase.co/storage/v1/object/public/menu";
 
 export default function EditDish() {
   const classes = useStyle();

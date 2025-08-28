@@ -6,7 +6,7 @@ import React, { useEffect, useState } from "react";
 import { createUseStyles } from "react-jss";
 
 const SUPABASE_IMAGE_PREFIX =
-  "https://ealmujmxbmhjvahkdbyo.supabase.co/storage/v1/object/public/menu";
+  "https://zwgovmkukyfqznkspkdm.supabase.co/storage/v1/object/public/menu";
 
 const getBase64 = (img: RcFile, callback: (url: string) => void) => {
   const reader = new FileReader();
