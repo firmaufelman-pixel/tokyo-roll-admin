@@ -1,4 +1,4 @@
-import { Button, Card, Col, Input, Menu, Modal, Space, Typography } from "antd";
+import { Button, Card, Col, Input, Menu, Modal, Space, Typography, message } from "antd";
 import Page from "components/Layout/Page";
 import PageTitle from "components/Layout/PageTitle";
 import Loader from "components/Others/Loader";
@@ -23,11 +23,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import Search from "antd/lib/input/Search";
-import {
-  CloseOutlined,
-  FilterOutlined,
-  SearchOutlined,
-} from "@ant-design/icons";
+import { CloseOutlined, FilterOutlined, SearchOutlined } from "@ant-design/icons";
 
 export default function Dishes() {
   const classes = useStyle();
@@ -35,81 +31,120 @@ export default function Dishes() {
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showFilterModal, setShowFilterModal] = useState(false);
-  const [filterCategory, setFilterCategory] = useState(null);
+  const [filterCategory, setFilterCategory] = useState<any>(null);
   const [seacrhVal, setSearchVal] = useState("");
+  const [rearranging, setRearranging] = useState(false); // same flow as Categories
+
   const sensors = useSensors(
     useSensor(PointerSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
   const toggleFilterModal = () => setShowFilterModal((curr) => !curr);
 
   const handleResetFilters =
     (toggleModal = false) =>
-    () => {
-      setFilterCategory(null);
-      if (toggleModal) {
-        toggleFilterModal();
-      }
-    };
+      () => {
+        setRearranging(false); // exit rearrange if clearing
+        setFilterCategory(null);
+        if (toggleModal) toggleFilterModal();
+      };
 
-  const handleSearch = (e: any) => {
-    setSearchVal(e.target.value);
-  };
+  const handleSearch = (e: any) => setSearchVal(e.target.value);
+  const handlePriceChange = () => fetchInitialData();
 
-  const handlePriceChange = (dish: any) => {
-    fetchInitialData();
-  };
-
-  function handleDragEnd(event: any) {
+  // EXACT same drag-end logic as Categories (frontend reorder)
+  const handleDragEnd = (event: any) => {
     const { active, over } = event;
+    if (!over || active.id === over.id) return;
 
-    if (active.id !== over.id) {
-      setDishes((curr) => {
-        const oldIndex = curr.findIndex((obj) => obj.id === active.id);
-        const newIndex = curr.findIndex((obj) => obj.id === over.id);
+    setDishes((curr) => {
+      const oldIndex = curr.findIndex((obj) => obj.id === active.id);
+      const newIndex = curr.findIndex((obj) => obj.id === over.id);
+      return arrayMove(curr, oldIndex, newIndex);
+    });
+  };
 
-        console.log(oldIndex, newIndex);
+  // Persist current order -> priority (highest number = top)
+  // Persist current on-screen order for this category
+  const saveReorder = async () => {
+    if (!filterCategory) return;
 
-        return arrayMove(curr, oldIndex, newIndex);
-      });
+    // Optional guard: avoid partial sets that could collide with hidden items
+    if (seacrhVal.trim() !== "") {
+      message.info("Clear search to save a full category order.");
+      return;
     }
-  }
+
+    const ids = dishes.map((d) => d.id);
+
+    // STEP 1: put all involved rows into the safe "0" bucket (duplicates allowed)
+    const { error: stageErr } = await supabase
+      .from("dishes")
+      .update({ priority: 0 })
+      .in("id", ids)              // scope only to what we're rearranging
+      .eq("category", filterCategory); // extra safety
+
+    if (stageErr) {
+      console.error(stageErr);
+      message.error("Couldn't stage priorities.");
+      return;
+    }
+
+    // STEP 2: assign the final unique priorities (highest = top)
+    const updates = dishes.map((d, idx) =>
+      supabase
+        .from("dishes")
+        .update({ priority: dishes.length - idx })
+        .eq("id", d.id)
+        .eq("category", filterCategory)
+    );
+
+    const results = await Promise.all(updates);
+    const firstErr = results.find((r) => r.error)?.error;
+    if (firstErr) {
+      console.error(firstErr);
+      message.error("Failed to save new order.");
+      return;
+    }
+
+    message.success("Rearranged successfully!");
+    setRearranging(false);
+    await fetchInitialData();
+  };
+
+
 
   const fetchCategories = async () => {
-    let { data, error } = await supabase.from("categories").select();
-
+    let { data } = await supabase.from("categories").select();
     if (!!data) setCategories(data);
   };
 
   const fetchInitialData = async () => {
     let query = supabase.from("dishes").select();
 
-    if (seacrhVal !== "") {
-      query.textSearch("dish_name", seacrhVal);
+    if (seacrhVal !== "") query.textSearch("dish_name", seacrhVal);
+    if (!!filterCategory) query.match({ category: filterCategory });
+
+    // NEW: sort by priority desc inside a category; otherwise alphabetical
+    if (filterCategory) {
+      query.order("priority", { ascending: false }).order("dish_name");
+    } else {
+      query.order("dish_name");
     }
 
-    if (!!filterCategory) {
-      query.match({ category: filterCategory });
-    }
-
-    let { data, error } = await query.order("dish_name");
-
-    if (!!data) {
+    const { data, error } = await query;
+    if (data) {
       setLoading(false);
       setDishes(data);
-      return;
+    } else {
+      console.log(error);
     }
-
-    console.log(error);
   };
 
+
   useEffect(() => {
-    if (!loading) {
-      fetchInitialData();
-    }
+    if (!loading) fetchInitialData();
   }, [seacrhVal, filterCategory]);
 
   useEffect(() => {
@@ -119,13 +154,28 @@ export default function Dishes() {
     }
   }, [loading]);
 
-  if (loading) {
-    return <Loader />;
-  }
+  if (loading) return <Loader />;
+
+  // flow you asked: filter → choose category → rearrange button appears
+  const showRearrangeBtn = !!filterCategory;
 
   return (
     <Page className={classes.dishesPage}>
-      <PageTitle showBackBtn text="Dishes" />
+      <PageTitle
+        showBackBtn
+        text="Dishes"
+        extra={
+          !!filterCategory && (
+            <Button
+              type="link"
+              onClick={() => (rearranging ? saveReorder() : setRearranging(true))}
+            >
+              {rearranging ? "Save" : "Rearrange"}
+            </Button>
+          )
+        }
+      />
+
 
       <Link to="/dishes/add">
         <Button block size="large" type="primary">
@@ -148,13 +198,8 @@ export default function Dishes() {
                 icon={<FilterOutlined />}
                 onClick={toggleFilterModal}
               />
-
               {!!filterCategory && (
-                <Button
-                  type="text"
-                  icon={<CloseOutlined />}
-                  onClick={handleResetFilters(false)}
-                />
+                <Button type="text" icon={<CloseOutlined />} onClick={handleResetFilters(false)} />
               )}
             </Space>
           }
@@ -179,6 +224,7 @@ export default function Dishes() {
             key: item.category_name,
             label: item.category_name,
             onClick: () => {
+              setRearranging(false);
               setFilterCategory(item.category_name);
               toggleFilterModal();
             },
@@ -186,21 +232,21 @@ export default function Dishes() {
         />
       </Modal>
 
-      {/* <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-      > */}
-      {/* <SortableContext items={dishes} strategy={verticalListSortingStrategy}> */}
-      {dishes.map((dish, index) => (
-        <DishListCard
-          key={index}
-          dish={dish}
-          onPriceChange={handlePriceChange}
-        />
-      ))}
-      {/* </SortableContext> */}
-      {/* </DndContext> */}
+      {rearranging ? (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={dishes} strategy={verticalListSortingStrategy}>
+            {dishes.map((dish, index) => (
+              <DishListCard rearranging key={index} dish={dish} />
+            ))}
+          </SortableContext>
+        </DndContext>
+      ) : (
+        <div>
+          {dishes.map((dish, index) => (
+            <DishListCard key={index} dish={dish} onPriceChange={handlePriceChange} />
+          ))}
+        </div>
+      )}
     </Page>
   );
 }
@@ -209,60 +255,26 @@ const useStyle = createUseStyles(({ colors }: Theme) => ({
   dishesPage: {
     padding: 40,
   },
-  dishCard: {
-    marginTop: 15,
-    backgroundColor: "#202020",
-    border: "none",
-  },
   inputWrapper: {
     marginTop: 15,
-
-    "& *": {
-      color: colors.light500,
-    },
-    "& .ant-input-prefix": {
-      marginRight: 10,
-    },
-    "& > .ant-typography": {
-      paddingBottom: 5,
-      display: "block",
-      color: colors.light500,
-    },
-    "& .ant-input , & .ant-select-selector , & .ant-select, & .ant-input-affix-wrapper":
-      {
-        width: "100%",
-        backgroundColor: "#202020 !important",
-        border: "none !important",
-      },
-
-    "& .ant-select-multiple .ant-select-selection-item": {
+    "& *": { color: colors.light500 },
+    "& .ant-input-prefix": { marginRight: 10 },
+    "& > .ant-typography": { paddingBottom: 5, display: "block", color: colors.light500 },
+    "& .ant-input , & .ant-select-selector , & .ant-select, & .ant-input-affix-wrapper": {
+      width: "100%",
       backgroundColor: "#202020 !important",
       border: "none !important",
-      "& .ant-select-selection-item-content": {
-        display: "flex",
-        alignItems: "center",
-      },
     },
   },
-
   filterModal: {
-    "& .ant-modal-title": {
-      color: colors.light100,
+    "& .ant-modal-title": { color: colors.light100 },
+    "& .ant-modal-header, & .ant-modal-body, & .ant-menu, & .ant-modal-footer, & .ant-btn": {
+      backgroundColor: "#202020 !important",
     },
-    "& .ant-modal-header, & .ant-modal-body, & .ant-menu, & .ant-modal-footer, & .ant-btn":
-      {
-        backgroundColor: "#202020 !important",
-      },
     "& .ant-menu-vertical, & .ant-modal-header, & .ant-modal-footer": {
       borderColor: "#202020 !important",
     },
-
-    "& .ant-modal-body": {
-      height: "calc(100vh - 300px)",
-      overflowY: "auto",
-    },
-    "& .ant-menu-item-active": {
-      borderRadius: 5,
-    },
+    "& .ant-modal-body": { height: "calc(100vh - 300px)", overflowY: "auto" },
+    "& .ant-menu-item-active": { borderRadius: 5 },
   },
 }));
